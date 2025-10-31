@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa Interativo de Nova Crobuzon</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Bulma CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css"
+  >
+
+   <!-- SweetAlert2 CSS -->
+   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #f5f5f5;
+    }
+
+    #map {
+      height: 80vh;
+      border-radius: 10px;
+      margin-top: 1rem;
+    }
+
+    .highlight-marker {
+      filter: drop-shadow(0 0 10px yellow) brightness(1.5);
+    }
+
+    .points-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    textarea {
+      font-family: monospace;
+    }
+
+    .list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .list-item span {
+      flex: 1;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <section class="section">
+    <div class="container">
+      <h1 class="title has-text-centered">📍 Mapa de Nova Crobuzon</h1>
+      <p class="subtitle has-text-centered">Clique no mapa para adicionar locais e registrar as coordenadas</p>
+
+      <!-- Barra de pesquisa -->
+      <div class="field has-addons has-addons-centered">
+        <div class="control is-expanded">
+          <input id="searchInput" class="input" type="text" placeholder="Digite o nome de um local...">
+        </div>
+        <div class="control">
+          <button id="searchBtn" class="button is-info">Buscar</button>
+        </div>
+      </div>
+
+      <!-- Mapa -->
+      <div id="map"></div>
+
+      <!-- Lista e JSON -->
+      <div class="columns mt-4">
+        <div class="column is-half">
+          <h2 class="subtitle">Locais Marcados</h2>
+          <div id="pointsList" class="box points-list"></div>
+        </div>
+        <div class="column is-half">
+          <h2 class="subtitle">JSON Gerado</h2>
+          <textarea id="jsonOutput" class="textarea" readonly rows="10"></textarea>
+          <div class="buttons mt-2">
+            <button id="copyBtn" class="button is-primary">📋 Copiar JSON</button>
+            <button id="exportBtn" class="button is-link">💾 Exportar JSON</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <script>
+    const imageUrl = 'newcrobuzon_map.jpg';
+    const imageWidth = 736;
+    const imageHeight = 533;
+    const bounds = [[0, 0], [imageHeight, imageWidth]];
+
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -1,
+      maxZoom: 4
+    });
+    L.imageOverlay(imageUrl, bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    let locais = [];
+    const markers = {};
+
+    function salvarLocalStorage() {
+      localStorage.setItem('mapa_nova_crobuzon', JSON.stringify(locais));
+    }
+
+    // 🖱️ Adicionar novo ponto
+    map.on('click', async (e) => {
+        const { value: nome } = await Swal.fire({
+        title: "Novo local",
+        input: "text",
+        inputLabel: "Nome do local:",
+        showCancelButton: true,
+        confirmButtonText: "Adicionar",
+        inputValidator: (value) => !value && "Digite um nome!"
+      });
+      if (!nome) return;
+
+      const { lat, lng } = e.latlng;
+      const marker = L.marker([lat, lng]).addTo(map)
+        .bindPopup(`<b>${nome}</b><br>x: ${lng.toFixed(2)}, y: ${lat.toFixed(2)}`);
+
+      const local = { nome, coords: [lat, lng] };
+      locais.push(local);
+      markers[nome.toLowerCase()] = marker;
+
+      atualizarLista();
+    });
+
+    // 🔍 Buscar e destacar local
+    document.getElementById('searchBtn').addEventListener('click', () => {
+      const termo = document.getElementById('searchInput').value.toLowerCase();
+      const marcador = markers[termo];
+      if (marcador) {
+        marcador.openPopup();
+        map.setView(marcador.getLatLng(), 2);
+        marcador._icon.classList.add('highlight-marker');
+        setTimeout(() => marcador._icon.classList.remove('highlight-marker'), 2000);
+      } else {
+        Swal.fire("Não encontrado", "Local não existe no mapa.", "info");
+      }
+    });
+
+    function atualizarLista() {
+      const list = document.getElementById('pointsList');
+      list.innerHTML = '';
+
+      locais.forEach((p, index) => {
+        const div = document.createElement('div');
+        div.className = 'list-item';
+
+        const span = document.createElement('span');
+        span.textContent = `${p.nome} → x:${p.coords[1].toFixed(2)}, y:${p.coords[0].toFixed(2)}`;
+        span.onclick = () => {
+          const marker = markers[p.nome.toLowerCase()];
+          marker.openPopup();
+          map.setView(marker.getLatLng(), 2);
+        };
+
+        // Botões editar e excluir
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'button is-small is-warning mr-2';
+        btnEdit.textContent = 'Editar';
+        btnEdit.onclick = () => editarLocal(index);
+
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'button is-small is-danger';
+        btnDelete.textContent = 'Excluir';
+        btnDelete.onclick = () => excluirLocal(index);
+
+        div.appendChild(span);
+        div.appendChild(btnEdit);
+        div.appendChild(btnDelete);
+        list.appendChild(div);
+      });
+
+      document.getElementById('jsonOutput').value = JSON.stringify(locais, null, 2);
+      salvarLocalStorage();
+    }
+
+    async function editarLocal(index) {
+        const { value: novoNome } = await Swal.fire({
+        title: "Editar local",
+        input: "text",
+        inputValue: locais[index].nome,
+        showCancelButton: true,
+        confirmButtonText: "Salvar",
+        inputValidator: (value) => !value && "Digite um nome!"
+      });
+
+      if (!novoNome) return;
+
+      const antigoNome = locais[index].nome.toLowerCase();
+      const marker = markers[antigoNome];
+
+      locais[index].nome = novoNome;
+      marker.setPopupContent(`<b>${novoNome}</b><br>x: ${locais[index].coords[1].toFixed(2)}, y: ${locais[index].coords[0].toFixed(2)}`);
+
+      // Atualiza referência
+      delete markers[antigoNome];
+      markers[novoNome.toLowerCase()] = marker;
+
+      atualizarLista();
+    }
+
+   async function excluirLocal(index) {
+        const confirma = await Swal.fire({
+        title: "Tem certeza?",
+        text: `Deseja excluir o local "${locais[index].nome}"?`,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Sim, excluir",
+        cancelButtonText: "Cancelar"
+      });
+
+      if (!confirma.isConfirmed) return;
+      const nome = locais[index].nome;
+      const marker = markers[nome.toLowerCase()];
+      if (marker) {
+        map.removeLayer(marker);
+        delete markers[nome.toLowerCase()];
+      }
+      locais.splice(index, 1);
+      atualizarLista();
+    }
+
+    document.getElementById('copyBtn').addEventListener('click', () => {
+      const text = document.getElementById('jsonOutput').value;
+      navigator.clipboard.writeText(text);
+      Swal.fire("Copiado!", "JSON copiado para a área de transferência.", "success");
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      const data = JSON.stringify(locais, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'locais_new_crobuzon.json';
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
+    function carregarDadosIniciais() {
+      const salvo = localStorage.getItem('mapa_nova_crobuzon');
+      if (salvo) {
+        locais = JSON.parse(salvo);
+      } else {
+         locais = [
+  {
+    "nome": "Ponte de Tar",
+    "coords": [
+      407.6779135452277,
+      236
+    ]
+  },
+  {
+    "nome": "Jardim do Peloro",
+    "coords": [
+      63.87161937712,
+      545.3333320617676
+    ]
+  },
+  {
+    "nome": "Siríaco",
+    "coords": [
+      98.8666597625529,
+      455.3333320617676
+    ]
+  },
+  {
+    "nome": "Quartelaria",
+    "coords": [
+      63.37169022875665,
+      350.8333320617676
+    ]
+  },
+  {
+    "nome": "Gidd Oriental",
+    "coords": [
+      359.68599063180835,
+      417.66666412353516
+    ]
+  },
+  {
+    "nome": "Universidade Nova Crobuzon",
+    "coords": [
+      343.8393818824339,
+      488.8333320617676
+    ]
+  }
+]
+      }
+
+      locais.forEach(p => {
+        const marker = L.marker(p.coords).addTo(map)
+          .bindPopup(`<b>${p.nome}</b><br>x: ${p.coords[1].toFixed(2)}, y: ${p.coords[0].toFixed(2)}`);
+        markers[p.nome.toLowerCase()] = marker;
+      });
+
+      atualizarLista();
+    }
+
+    carregarDadosIniciais();
+
+  </script>
+</body>
+</html>
