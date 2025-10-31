@@ -54,6 +54,14 @@
       flex: 1;
       cursor: pointer;
     }
+
+    .descricao {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 4px;
+      margin-left: 8px;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
@@ -118,30 +126,160 @@
       localStorage.setItem('mapa_nova_crobuzon', JSON.stringify(locais));
     }
 
+    function popupHTML(local) {
+      let html = `<b>${local.nome}</b><br>x: ${local.coords[1].toFixed(2)}, y: ${local.coords[0].toFixed(2)}`;
+      if (local.descricao) {
+        html += `<br><i>${local.descricao}</i>`;
+      }
+      return html;
+    }
+
     // 🖱️ Adicionar novo ponto
     map.on('click', async (e) => {
-        const { value: nome } = await Swal.fire({
+      const { value: formValues } = await Swal.fire({
         title: "Novo local",
-        input: "text",
-        inputLabel: "Nome do local:",
+        html: `
+          <input id="swal-nome" class="swal2-input" placeholder="Nome do local">
+          <textarea id="swal-desc" class="swal2-textarea" placeholder="Descrição (opcional)"></textarea>
+        `,
+        focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: "Adicionar",
-        inputValidator: (value) => !value && "Digite um nome!"
+        preConfirm: () => {
+          const nome = document.getElementById('swal-nome').value.trim();
+          const descricao = document.getElementById('swal-desc').value.trim();
+          if (!nome) return Swal.showValidationMessage("Digite um nome!");
+          return { nome, descricao };
+        }
       });
-      if (!nome) return;
+
+      if (!formValues) return;
 
       const { lat, lng } = e.latlng;
+      const local = {
+        nome: formValues.nome,
+        descricao: formValues.descricao || null,
+        coords: [lat, lng]
+      };
+
       const marker = L.marker([lat, lng]).addTo(map)
-        .bindPopup(`<b>${nome}</b><br>x: ${lng.toFixed(2)}, y: ${lat.toFixed(2)}`);
+        .bindPopup(popupHTML(local));
 
-      const local = { nome, coords: [lat, lng] };
       locais.push(local);
-      markers[nome.toLowerCase()] = marker;
-
+      markers[local.nome.toLowerCase()] = marker;
       atualizarLista();
     });
 
-    // 🔍 Buscar e destacar local
+
+    function atualizarLista() {
+      const list = document.getElementById('pointsList');
+      list.innerHTML = '';
+
+      locais.forEach((p, index) => {
+        const div = document.createElement('div');
+        div.className = 'list-item';
+
+        const header = document.createElement('div');
+        header.className = 'list-item-header';
+
+        const span = document.createElement('span');
+        span.textContent = `${p.nome} → x:${p.coords[1].toFixed(2)}, y:${p.coords[0].toFixed(2)}`;
+        span.onclick = () => {
+          const marker = markers[p.nome.toLowerCase()];
+          marker.openPopup();
+          map.setView(marker.getLatLng(), 2);
+        };
+
+        const btns = document.createElement('div');
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'button is-small is-warning mr-2';
+        btnEdit.textContent = 'Editar';
+        btnEdit.onclick = () => editarLocal(index);
+
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'button is-small is-danger';
+        btnDelete.textContent = 'Excluir';
+        btnDelete.onclick = () => excluirLocal(index);
+
+        btns.appendChild(btnEdit);
+        btns.appendChild(btnDelete);
+
+        header.appendChild(span);
+        header.appendChild(btns);
+        div.appendChild(header);
+
+        if (p.descricao) {
+          const desc = document.createElement('div');
+          desc.className = 'descricao';
+          desc.textContent = p.descricao;
+          div.appendChild(desc);
+        }
+
+        list.appendChild(div);
+      });
+
+      document.getElementById('jsonOutput').value = JSON.stringify(locais, null, 2);
+      salvarLocalStorage();
+    }
+
+    async function editarLocal(index) {
+      const atual = locais[index];
+      const { value: formValues } = await Swal.fire({
+        title: "Editar local",
+        html: `
+          <input id="swal-nome" class="swal2-input" placeholder="Nome do local" value="${atual.nome}">
+          <textarea id="swal-desc" class="swal2-textarea" placeholder="Descrição (opcional)">${atual.descricao || ''}</textarea>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: "Salvar",
+        preConfirm: () => {
+          const nome = document.getElementById('swal-nome').value.trim();
+          const descricao = document.getElementById('swal-desc').value.trim();
+          if (!nome) return Swal.showValidationMessage("Digite um nome!");
+          return { nome, descricao };
+        }
+      });
+
+      if (!formValues) return;
+
+      const antigoNome = locais[index].nome.toLowerCase();
+      const marker = markers[antigoNome];
+
+      locais[index].nome = formValues.nome;
+      locais[index].descricao = formValues.descricao || null;
+
+      marker.setPopupContent(popupHTML(locais[index]));
+
+      delete markers[antigoNome];
+      markers[formValues.nome.toLowerCase()] = marker;
+
+      atualizarLista();
+    }
+
+    async function excluirLocal(index) {
+      const confirma = await Swal.fire({
+        title: "Tem certeza?",
+        text: `Deseja excluir o local "${locais[index].nome}"?`,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Sim, excluir",
+        cancelButtonText: "Cancelar"
+      });
+
+      if (!confirma.isConfirmed) return;
+
+      const nome = locais[index].nome;
+      const marker = markers[nome.toLowerCase()];
+      if (marker) {
+        map.removeLayer(marker);
+        delete markers[nome.toLowerCase()];
+      }
+      locais.splice(index, 1);
+      atualizarLista();
+    }
+
+    // 🔍 Buscar local
     document.getElementById('searchBtn').addEventListener('click', () => {
       const termo = document.getElementById('searchInput').value.toLowerCase();
       const marcador = markers[termo];
@@ -155,88 +293,6 @@
       }
     });
 
-    function atualizarLista() {
-      const list = document.getElementById('pointsList');
-      list.innerHTML = '';
-
-      locais.forEach((p, index) => {
-        const div = document.createElement('div');
-        div.className = 'list-item';
-
-        const span = document.createElement('span');
-        span.textContent = `${p.nome} → x:${p.coords[1].toFixed(2)}, y:${p.coords[0].toFixed(2)}`;
-        span.onclick = () => {
-          const marker = markers[p.nome.toLowerCase()];
-          marker.openPopup();
-          map.setView(marker.getLatLng(), 2);
-        };
-
-        // Botões editar e excluir
-        const btnEdit = document.createElement('button');
-        btnEdit.className = 'button is-small is-warning mr-2';
-        btnEdit.textContent = 'Editar';
-        btnEdit.onclick = () => editarLocal(index);
-
-        const btnDelete = document.createElement('button');
-        btnDelete.className = 'button is-small is-danger';
-        btnDelete.textContent = 'Excluir';
-        btnDelete.onclick = () => excluirLocal(index);
-
-        div.appendChild(span);
-        div.appendChild(btnEdit);
-        div.appendChild(btnDelete);
-        list.appendChild(div);
-      });
-
-      document.getElementById('jsonOutput').value = JSON.stringify(locais, null, 2);
-      salvarLocalStorage();
-    }
-
-    async function editarLocal(index) {
-        const { value: novoNome } = await Swal.fire({
-        title: "Editar local",
-        input: "text",
-        inputValue: locais[index].nome,
-        showCancelButton: true,
-        confirmButtonText: "Salvar",
-        inputValidator: (value) => !value && "Digite um nome!"
-      });
-
-      if (!novoNome) return;
-
-      const antigoNome = locais[index].nome.toLowerCase();
-      const marker = markers[antigoNome];
-
-      locais[index].nome = novoNome;
-      marker.setPopupContent(`<b>${novoNome}</b><br>x: ${locais[index].coords[1].toFixed(2)}, y: ${locais[index].coords[0].toFixed(2)}`);
-
-      // Atualiza referência
-      delete markers[antigoNome];
-      markers[novoNome.toLowerCase()] = marker;
-
-      atualizarLista();
-    }
-
-   async function excluirLocal(index) {
-        const confirma = await Swal.fire({
-        title: "Tem certeza?",
-        text: `Deseja excluir o local "${locais[index].nome}"?`,
-        icon: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Sim, excluir",
-        cancelButtonText: "Cancelar"
-      });
-
-      if (!confirma.isConfirmed) return;
-      const nome = locais[index].nome;
-      const marker = markers[nome.toLowerCase()];
-      if (marker) {
-        map.removeLayer(marker);
-        delete markers[nome.toLowerCase()];
-      }
-      locais.splice(index, 1);
-      atualizarLista();
-    }
 
     document.getElementById('copyBtn').addEventListener('click', () => {
       const text = document.getElementById('jsonOutput').value;
